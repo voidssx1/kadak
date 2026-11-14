@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛡️ NIDS 2.0 — Autonomous Cyber Defense SOC</title>
+  <meta name="description" content="Dual-Tier AI Autonomous Network Intrusion Detection System with Supervised LightGBM and Deep Autoencoder Zero-Day Defense.">
+
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js for High-Performance Real-Time Visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Ambient Cyber Glow Backdrop -->
+  <div class="ambient-glow glow-cyan"></div>
+  <div class="ambient-glow glow-purple"></div>
+
+  <!-- Top Navigation / System Header -->
+  <header class="soc-header">
+    <div class="header-branding">
+      <div class="logo-shield">
+        <span class="shield-icon">🛡️</span>
+        <span class="pulse-ring"></span>
+      </div>
+      <div>
+        <div class="brand-title">NIDS 2.0 <span class="brand-badge">AUTONOMOUS SOC</span></div>
+        <div class="brand-subtitle">Dual-Tier AI Defense Engine • Microsecond Wire Protection</div>
+      </div>
+    </div>
+
+    <!-- Live Status Indicators -->
+    <div class="header-status-strip">
+      <div class="status-item">
+        <span class="status-label">ACCELERATOR</span>
+        <span class="status-val" id="val-hardware"><span class="dot dot-green"></span> MPS / ARM64</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">CALIBRATED THRESHOLD</span>
+        <span class="status-val text-cyan" id="val-tau">τ = 0.0687</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">LATENT PROTOTYPES</span>
+        <span class="status-val text-purple" id="val-prototypes">8 Centroids</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">TELEMETRY FEED</span>
+        <span class="status-val" id="ws-status-badge"><span class="dot dot-green pulse"></span> LIVE WS</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main SOC Layout Container -->
+  <main class="soc-main">
+    <!-- Top Executive Metric KPI Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card" id="card-total-flows">
+        <div class="kpi-header">
+          <span class="kpi-title">TOTAL FLOWS INSPECTED</span>
+          <span class="kpi-icon">⚡</span>
+        </div>
+        <div class="kpi-value text-cyan" id="kpi-total-flows">0</div>
+        <div class="kpi-footer">Wire throughput at microsecond latency</div>
+      </div>
+
+      <div class="kpi-card" id="card-benign">
+        <div class="kpi-header">
+          <span class="kpi-title">BENIGN TRAFFIC (NORMAL)</span>
+          <span class="kpi-icon">🟢</span>
+        </div>
+        <div class="kpi-value text-green" id="kpi-benign-count">0</div>
+        <div class="kpi-footer"><span id="kpi-benign-pct">100%</span> conforms to benign manifold</div>
+      </div>
+
+      <div class="kpi-card" id="card-known">
+        <div class="kpi-header">
+          <span class="kpi-title">KNOWN ATTACKS (TIER-1)</span>
+          <span class="kpi-icon">🔴</span>
+        </div>
+        <div class="kpi-value text-orange" id="kpi-known-count">0</div>
+        <div class="kpi-footer">Blocked by LightGBM signatures (< 1ms)</div>
+      </div>
+
+      <div class="kpi-card kpi-highlight-zero" id="card-zeroday">
+        <div class="kpi-header">
+          <span class="kpi-title">ZERO-DAY THREATS (TIER-2)</span>
+          <span class="kpi-icon">🟣</span>
+        </div>
+        <div class="kpi-value text-purple" id="kpi-zeroday-count">0</div>
+        <div class="kpi-footer">Quarantined via Autoencoder MSE departure</div>
+      </div>
+
+      <div class="kpi-card" id="card-latency">
+        <div class="kpi-header">
+          <span class="kpi-title">AVERAGE INFERENCE RTT</span>
+          <span class="kpi-icon">⏱️</span>
+        </div>
+        <div class="kpi-value text-blue" id="kpi-avg-latency">9.5 <span class="unit">ms</span></div>
+        <div class="kpi-footer">Dual-tier GPU pipeline evaluation</div>
+      </div>
+    </section>
+
+    <!-- Interactive Attack Injection Command Bar -->
+    <section class="injection-panel">
+      <div class="injection-label">
+        <span class="crosshair-icon">🎯</span>
+        <strong>LIVE THREAT INJECTION CONSOLE:</strong>
+        <span class="injection-subtext">Click any payload to inject into the live inference pipeline</span>
+      </div>
+      <div class="injection-buttons">
+        <button class="btn btn-benign" id="btn-inject-benign">
+          <span class="btn-dot"></span> Normal Flow
+        </button>
+        <button class="btn btn-dos" id="btn-inject-dos">
+          <span class="btn-dot"></span> SYN Flood (DoS)
+        </button>
+        <button class="btn btn-portscan" id="btn-inject-portscan">
+          <span class="btn-dot"></span> Port Probe (Scan)
+        </button>
+        <button class="btn btn-zeroday" id="btn-inject-zeroday">
+          <span class="btn-dot pulse"></span> Novel Zero-Day Threat 🚨
+        </button>
+        <button class="btn btn-pause" id="btn-toggle-stream">
+          <span id="stream-btn-text">⏸️ Pause Feed</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Middle Two-Column Grid: Live Telemetry Table & Real-Time Charts -->
+    <div class="middle-grid">
+      <!-- Left Column: Real-Time Flow Inspection Stream Table (65%) -->
+      <section class="panel-box flow-stream-box">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="panel-icon">📡</span>
+            <h2 class="panel-title">REAL-TIME TRAFFIC TRIAGE STREAM</h2>
+            <span class="live-pill"><span class="dot dot-green pulse"></span> STREAMING</span>
+          </div>
+          <div class="panel-filter-group">
+            <span class="filter-label">Filter:</span>
+            <select id="filter-classification" class="select-filter">
+              <option value="ALL">All Flows</option>
+              <option value="BENIGN">Benign Only</option>
+              <option value="DoS">DoS Only</option>
+              <option value="PortScan">PortScan Only</option>
+              <option value="Infiltration_ZeroDay">Zero-Day Only</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="soc-table" id="flow-table">
+            <thead>
+              <tr>
+                <th>TIMESTAMP</th>
+                <th>SOURCE IP</th>
+                <th>DESTINATION</th>
+                <th>CLASSIFICATION</th>
+                <th>DETECTION TIER</th>
+                <th>RECON MSE (vs τ)</th>
+                <th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody id="flow-tbody">
+              <!-- Live flow rows inserted dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right Column: Live Charts & Diagnostics (35%) -->
+      <section class="panel-box charts-box">
+        <!-- Chart 1: Real-Time Autoencoder Error Departure vs Threshold -->
+        <div class="chart-wrapper">
+          <div class="chart-header">
+            <h3 class="chart-title">AUTOENCODER RECONSTRUCTION ERROR (vs τ = 0.0687)</h3>
+            <span class="chart-sub">Spike above red dashed line = Zero-Day Threat</span>
+          </div>
+          <div class="canvas-container">
+            <canvas id="chart-mse-timeline"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 2: Threat Distribution Donut -->
+        <div class="chart-wrapper" style="margin-top: 18px;">
+          <div class="chart-header">
+            <h3 class="chart-title">THREAT CATEGORY DISTRIBUTION</h3>
+            <span class="chart-sub">Dual-Tier Arbitration Ratio</span>
+          </div>
+          <div class="canvas-container donut-container">
+            <canvas id="chart-distribution"></canvas>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Bottom Section: Latent Space Prototypes & Architecture Insights -->
+    <section class="panel-box prototypes-box">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <span class="panel-icon">🧠</span>
+          <h2 class="panel-title">LATENT SPACE PROTOTYPES (16-D BOTTLENECK MANIFOLD)</h2>
+          <span class="badge-sub">KMeans Centroids of Normal Telecommunication Traffic</span>
+        </div>
+        <div class="prototypes-legend">
+          <span class="legend-dot" style="background:#059669"></span> Cluster In-Manifold (&lt; 2.5)
+          <span class="legend-dot" style="background:#a855f7; margin-left: 12px;"></span> Novelty Distance Out-of-Bounds (&gt; 5.0)
+        </div>
+      </div>
+      <div class="prototypes-grid" id="prototypes-container">
+        <!-- 8 Centroid chips loaded dynamically -->
+      </div>
+    </section>
+  </main>
+
+  <!-- Forensics Detail Modal for Clicked Flows -->
+  <div class="modal-backdrop" id="forensics-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🔎</span>
+          <h3 class="modal-title">PACKET FLOW FORENSICS & DUAL-TIER TRIAGE</h3>
+        </div>
+        <button class="modal-close" id="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-content">
+        <!-- Injected via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <footer class="soc-footer">
+    <div><strong>NIDS 2.0</strong> — Built for Enterprise Xebia Showcase • PyTorch + LightGBM + Rust + FastAPI</div>
+    <div class="footer-links">
+      <span class="status-live">● System Operational</span>
+      <a href="/docs" target="_blank" class="api-docs-link">📖 Interactive API Docs (Swagger)</a>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
