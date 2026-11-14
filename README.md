@@ -1,4 +1,4 @@
-# 🛡️ NIDS 2.0: Autonomous Network Intrusion Detection System
+#  NIDS 2.0: Autonomous Network Intrusion Detection System
 ### Dual-Tier AI Architecture: Supervised LightGBM + Unsupervised Deep Autoencoder
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](#)
@@ -10,7 +10,7 @@
 
 ---
 
-## 🎯 Executive Summary & Problem Statement
+##  Executive Summary & Problem Statement
 
 In enterprise telecommunications and cloud infrastructure, traditional signature-based firewalls (like AWS WAF or Snort) suffer from a fundamental architectural flaw: **they can only detect attacks they have seen before**. When an advanced adversary launches a **Zero-Day exploit (unseen payload)**, signature matching fails completely, allowing lateral network infiltration.
 
@@ -22,36 +22,36 @@ In enterprise telecommunications and cloud infrastructure, traditional signature
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph DataPlane ["🦀 Wire Data Plane (Rust Engine)"]
+    subgraph DataPlane [" Wire Data Plane (Rust Engine)"]
         NIC["Physical Network Interface (eth0 / en0)"] -->|"Zero-Copy Raw Sockets"| Sniffer["Rust Packet Sniffer & Flow Aggregator"]
         Sniffer -->|"5-Tuple Flow Aggregation"| FlowStream["Raw 77-Metric CICIDS Flow Records"]
     end
 
-    subgraph ControlPlane ["🐍 AI Inference Engine (FastAPI & PyTorch)"]
+    subgraph ControlPlane [" AI Inference Engine (FastAPI & PyTorch)"]
         FlowStream -->|"Async HTTP Stream"| Adapter["Feature Adapter (backend/adapter.py)"]
         Adapter -->|"Derive 14 Interaction Metrics & RobustScale"| ScaledVector["91-Dimensional Feature Vector [-10, 10]"]
 
         ScaledVector --> Tier1{"Tier-1: LightGBM Signature Match?"}
 
-        Tier1 -->|"Confidence >= 70% Attack"| KnownThreat["🚨 KNOWN ATTACK DETECTED (DoS / PortScan / BruteForce)<br/>Action: BLOCK_FLOW (iptables DROP)"]
-        
+        Tier1 -->|"Confidence >= 70% Attack"| KnownThreat[" KNOWN ATTACK DETECTED (DoS / PortScan / BruteForce)<br/>Action: BLOCK_FLOW (iptables DROP)"]
+
         Tier1 -->|"Classified as BENIGN / Uncertain"| Tier2["Tier-2: Deep Autoencoder (8 Layers)"]
-        
+
         Tier2 -->|"Reconstruction Pass"| MSECalc["Calculate Reconstruction MSE Error"]
         MSECalc --> AnomalyCheck{"MSE >= Tau Threshold (0.0687)?"}
 
-        AnomalyCheck -->|"YES (Departure >= 200x)"| ZeroDay["🚨 NOVEL ZERO-DAY THREAT DETECTED<br/>Action: QUARANTINE_HOST (VLAN Isolation)"]
-        AnomalyCheck -->|"NO (Conforms to Manifold)"| SafeTraffic["🟢 BENIGN NORMAL TRAFFIC<br/>Action: ALLOW"]
+        AnomalyCheck -->|"YES (Departure >= 200x)"| ZeroDay[" NOVEL ZERO-DAY THREAT DETECTED<br/>Action: QUARANTINE_HOST (VLAN Isolation)"]
+        AnomalyCheck -->|"NO (Conforms to Manifold)"| SafeTraffic[" BENIGN NORMAL TRAFFIC<br/>Action: ALLOW"]
 
         Tier2 -->|"16-D Latent Bottleneck"| ProtoDist["Calculate Distance to 8 Benign Prototypes"]
         ProtoDist --> Forensics["Forensic Confidence & Anomaly Score"]
     end
 
-    subgraph PresentationPlane ["🖥️ Security Operations Center (SOC Dashboard)"]
+    subgraph PresentationPlane [" Security Operations Center (SOC Dashboard)"]
         KnownThreat -->|"WebSocket Telemetry"| Dashboard["Real-Time SOC Dashboard (Port 8000)"]
         ZeroDay -->|"WebSocket Telemetry"| Dashboard
         SafeTraffic -->|"WebSocket Telemetry"| Dashboard
@@ -61,7 +61,7 @@ flowchart TD
 
 ---
 
-## 📊 Benchmark Results & Performance Validation
+##  Benchmark Results & Performance Validation
 
 Models were evaluated on a calibrated 25,000-flow telecommunications benchmark matching the **CICIDS2017 international standard**. The Zero-Day threat class (`Infiltration_ZeroDay`) was **100% held out** from training to evaluate true anomaly detection capability.
 
@@ -76,7 +76,7 @@ Models were evaluated on a calibrated 25,000-flow telecommunications benchmark m
 
 ---
 
-## 🗂️ Project Structure
+##  Project Structure
 
 ```
 .
@@ -115,7 +115,7 @@ Models were evaluated on a calibrated 25,000-flow telecommunications benchmark m
 
 ---
 
-## 🚀 Quickstart & Installation
+##  Quickstart & Installation
 
 ### 1. Clone & Set Up Environment
 
@@ -142,19 +142,19 @@ Run the automated backend diagnostic suite:
 Expected diagnostic output:
 ```
 =================================================================
-🧪 Running NIDS 2.0 Backend Diagnostic Suite...
+ Running NIDS 2.0 Backend Diagnostic Suite...
 =================================================================
-✅ RiskEngine initialized successfully on: mps / cuda
+ RiskEngine initialized successfully on: mps / cuda
    Input feature dimensions : 91
    Calibrated threshold (tau): 0.0687
    Cluster prototypes loaded : 8
 -----------------------------------------------------------------
-🔎 Testing [BENIGN]   : MSE: 0.0007 (tau=0.0687) -> ALLOW ✅
-🔎 Testing [DoS]      : LightGBM Signature Match -> BLOCK_FLOW 🔴
-🔎 Testing [PortScan] : LightGBM Signature Match -> BLOCK_FLOW 🟠
-🔎 Testing [ZeroDay]  : MSE: 16.3570 (tau=0.0687) -> QUARANTINE_HOST 🟣
+ Testing [BENIGN]   : MSE: 0.0007 (tau=0.0687) -> ALLOW
+ Testing [DoS]      : LightGBM Signature Match -> BLOCK_FLOW
+ Testing [PortScan] : LightGBM Signature Match -> BLOCK_FLOW
+ Testing [ZeroDay]  : MSE: 16.3570 (tau=0.0687) -> QUARANTINE_HOST
 =================================================================
-🎉 All 4 traffic categories successfully validated against Dual-Tier AI!
+ All 4 traffic categories successfully validated against Dual-Tier AI!
 ```
 
 ### 3. Launch the Production Backend & SOC Dashboard
@@ -165,8 +165,8 @@ Start the FastAPI ASGI server:
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open your browser to:  
-👉 **`http://127.0.0.1:8000/`**  
+Open your browser to:
+ **`http://127.0.0.1:8000/`**
 *(Or explore interactive Swagger API docs at `http://127.0.0.1:8000/docs`)*
 
 ### 4. Stream Live Network Traffic & Attacks
@@ -181,7 +181,7 @@ Watch real-time packets stream across the dashboard, observing the live **Recons
 
 ---
 
-## 🧠 Scientific & Algorithmic Deep Dive
+##  Scientific & Algorithmic Deep Dive
 
 ### 1. Feature Engineering (77 Raw $\to$ 91 Features)
 Network packet raw metadata lacks direct behavioral signals. We engineer 14 interaction metrics:
@@ -205,7 +205,7 @@ Enabling continuous anomaly confidence scoring.
 
 ---
 
-## 🛡️ Autonomous Operational Actions
+##  Autonomous Operational Actions
 
 | Threat Category | Detection Tier | Action Taken | Operational Mechanism |
 | :--- | :--- | :---: | :--- |
@@ -216,7 +216,7 @@ Enabling continuous anomaly confidence scoring.
 
 ---
 
-## 📜 Authors & Showcase Context
+##  Authors & Showcase Context
 * **Project:** Autonomous Network Intrusion Detection System (NIDS 2.0)
 * **Showcase Track:** Advanced AI / Cybersecurity Enterprise Showcase (Xebia)
 * **Standard Compatibility:** CICIDS2017 Benchmark Flow Schema
