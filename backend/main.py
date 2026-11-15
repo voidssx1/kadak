@@ -66,6 +66,7 @@ stats = {
     "benign_count": 0,
     "known_count": 0,
     "zeroday_count": 0,
+    "unknown_count": 0,
     "suspicious_count": 0,
     "malicious_count": 0,
     "critical_count": 0,
@@ -80,12 +81,51 @@ MODE_LIVE = "live"
 MODE_CAPTURED = "captured"
 MODE_DEMO = "demo"
 
+MODE_CONFIG = {
+    MODE_LIVE: {
+        "name": "LIVE CAPTURE",
+        "description": "Actual current packets captured via Rust libpcap engine",
+        "source_file": "None (libpcap stream)",
+    },
+    MODE_CAPTURED: {
+        "name": "CAPTURED REPLAY",
+        "description": "Historical background network capture replay (live_flows.jsonl)",
+        "source_file": "demo_traffic.jsonl",
+    },
+    MODE_DEMO: {
+        "name": "DEMO / LAB REPLAY",
+        "description": "Controlled SOC demonstration feed from benchmark dataset",
+        "source_file": "demo_traffic.jsonl",
+    },
+}
+
 current_mode: str = os.getenv("FLOW_REPLAY_MODE", MODE_DEMO)
-live_interface: str = os.getenv("CAPTURE_INTERFACE", "eth0")
-replay_delay: float = float(os.getenv("FLOW_REPLAY_DELAY", "0.2"))
+live_interface: str = os.getenv("CAPTURE_INTERFACE", "virbr0")
+replay_delay: float = float(os.getenv("FLOW_REPLAY_DELAY", "0.15"))
 is_replaying: bool = False
 replay_task: Optional[asyncio.Task] = None
 live_bridge_proc: Optional[asyncio.subprocess.Process] = None
+
+
+def get_stats_payload() -> Dict[str, Any]:
+    return {
+        "total_flows": stats["total_flows"],
+        "normal_count": stats["normal_count"],
+        "benign_count": stats["benign_count"],
+        "known_count": stats["known_count"],
+        "zeroday_count": stats["zeroday_count"],
+        "unknown_count": stats["zeroday_count"],
+        "suspicious_count": stats["suspicious_count"],
+        "malicious_count": stats["malicious_count"],
+        "critical_count": stats["critical_count"],
+        "total_risk_sum": round(stats["total_risk_sum"], 1),
+        "average_risk": stats["average_risk"],
+        "avg_latency_ms": stats["avg_latency_ms"],
+        "mode": current_mode,
+        "mode_name": MODE_CONFIG.get(current_mode, {}).get("name", current_mode.upper()),
+        "interface": live_interface if current_mode == MODE_LIVE else None,
+        "replaying": is_replaying,
+    }
 
 
 def reset_stats_and_history():
@@ -96,6 +136,7 @@ def reset_stats_and_history():
     stats["benign_count"] = 0
     stats["known_count"] = 0
     stats["zeroday_count"] = 0
+    stats["unknown_count"] = 0
     stats["suspicious_count"] = 0
     stats["malicious_count"] = 0
     stats["critical_count"] = 0
@@ -270,20 +311,30 @@ def generate_sample_flow(threat_type: str = "BENIGN") -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Background Replay & Live Sniffer Management
 # ─────────────────────────────────────────────────────────────────────────────
-async def broadcast_verdict(verdict: Dict[str, Any]):
-    """Broadcasts single flow verdict to all connected WebSockets."""
+async def broadcast_raw(payload: Dict[str, Any]):
     if not active_connections:
         return
-    payload = json.dumps({"type": "flow_telemetry", "data": verdict})
+    text = json.dumps(payload)
     disconnected = []
-    for ws in active_connections:
+    for ws in list(active_connections):
         try:
-            await ws.send_text(payload)
+            await ws.send_text(text)
         except Exception:
             disconnected.append(ws)
     for ws in disconnected:
         if ws in active_connections:
             active_connections.remove(ws)
+
+
+async def broadcast_verdict(alert: Dict[str, Any]):
+    """Broadcasts single flow verdict to all connected WebSockets in both v1.0 and v1.1 formats."""
+    st = get_stats_payload()
+    payload = {
+        "type": "flow_alert",
+        "data": alert,
+        "stats": st,
+    }
+    await broadcast_raw(payload)
 
 
 def get_risk_engine() -> RiskEngine:
@@ -300,38 +351,102 @@ def process_flow_record(raw_flow: Dict[str, Any]) -> Dict[str, Any]:
     engine = get_risk_engine()
     verdict = engine.inspect_flow(raw_flow)
 
-    # Attach network 5-tuple
-    verdict["source_ip"] = raw_flow.get("src_ip", raw_flow.get("source_ip", verdict.get("source_ip", "192.168.1.100")))
-    verdict["destination_ip"] = raw_flow.get("dst_ip", raw_flow.get("destination_ip", verdict.get("destination_ip", "10.0.0.1")))
-    verdict["destination_port"] = int(raw_flow.get("destination_port", raw_flow.get("dst_port", raw_flow.get("Destination Port", verdict.get("destination_port", 80)))))
-    verdict["protocol"] = str(raw_flow.get("protocol", "TCP")).upper()
+    src_ip = str(raw_flow.get("src_ip", raw_flow.get("Source IP", verdict.get("source_ip", "192.168.1.100"))))
+    dst_ip = str(raw_flow.get("dst_ip", raw_flow.get("Destination IP", verdict.get("destination_ip", "10.0.0.1"))))
+    src_port = int(raw_flow.get("src_port", raw_flow.get("Source Port", verdict.get("source_port", 40000 + random.randint(1, 20000)))))
+    dst_port = int(raw_flow.get("dst_port", raw_flow.get("destination_port", raw_flow.get("Destination Port", verdict.get("destination_port", 80)))))
+    protocol = str(raw_flow.get("protocol", "TCP")).upper()
+
+    flow_dur = float(raw_flow.get("flow_duration_secs", float(raw_flow.get("Flow Duration", 0.0)) / 1e6))
+    tot_pkts = int(raw_flow.get("total_fwd_packets", raw_flow.get("Total Fwd Packets", 1)) + raw_flow.get("total_bwd_packets", raw_flow.get("Total Backward Packets", 1)))
+    tot_bytes = int(raw_flow.get("total_fwd_bytes", raw_flow.get("Total Length of Fwd Packets", 100)) + raw_flow.get("total_bwd_bytes", raw_flow.get("Total Length of Bwd Packets", 100)))
+
+    cls = verdict.get("classification", "BENIGN")
+    conf = float(verdict.get("confidence", 0.95))
+    recon_err = float(verdict.get("reconstruction_error", 0.0))
+    proto_dist = float(verdict.get("prototype_distance", 1.0))
+    is_zd = bool(verdict.get("is_zero_day", False) or "ZERO" in cls.upper())
+    is_anom = bool(verdict.get("is_anomaly", False))
+    lat = float(verdict.get("latency_ms", 1.0))
+
+    if cls == "BENIGN":
+        pred_label = "Normal"
+        decision = "NORMAL"
+        action = "ALLOW"
+        risk_score = round(min(15.0, (recon_err / max(1e-5, engine.threshold)) * 10.0), 1)
+    elif is_zd:
+        pred_label = "UNKNOWN"
+        decision = "UNKNOWN ATTACK"
+        action = "QUARANTINE_HOST"
+        risk_score = round(min(100.0, 75.0 + (proto_dist * 4.0)), 1)
+    else:
+        pred_label = cls
+        if cls in ("DoS", "BruteForce"):
+            decision = "CRITICAL"
+        else:
+            decision = "MALICIOUS"
+        action = "BLOCK_FLOW"
+        risk_score = round(min(100.0, max(75.0, conf * 95.0)), 1)
+
+    alert = {
+        "flow_id": raw_flow.get("flow_id", f"flow-{int(time.time()*1000)}-{random.randint(100, 999)}"),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
+        "src_port": src_port,
+        "dst_port": dst_port,
+        "protocol": protocol,
+        "flow_duration_secs": round(flow_dur, 4),
+        "total_packets": tot_pkts,
+        "total_bytes": tot_bytes,
+        "prediction": pred_label,
+        "confidence": round(conf, 4),
+        "anomaly": is_anom,
+        "anomaly_score": round(recon_err, 4),
+        "threshold": round(engine.threshold, 4),
+        "risk_score": risk_score,
+        "decision": decision,
+        "action": action,
+        "reason": verdict.get("reason", ""),
+        # v1.1 compatibility fields
+        "source_ip": src_ip,
+        "destination_ip": dst_ip,
+        "destination_port": dst_port,
+        "classification": cls,
+        "threat_level": verdict.get("threat_level", "INFO"),
+        "detection_tier": verdict.get("detection_tier", "Dual-Tier AI"),
+        "quarantine_action": action,
+        "reconstruction_error": round(recon_err, 6),
+        "prototype_distance": round(proto_dist, 4),
+        "latency_ms": lat,
+    }
 
     # Update Statistics
     stats["total_flows"] += 1
-    cls = verdict.get("classification", "BENIGN")
-    act = verdict.get("quarantine_action", "ALLOW")
-    lat = verdict.get("latency_ms", 1.0)
-
-    if cls == "BENIGN" or act == "ALLOW":
+    if decision == "NORMAL":
         stats["normal_count"] += 1
         stats["benign_count"] += 1
-    elif verdict.get("is_zero_day", False) or "ZERO" in cls.upper():
+    elif decision == "UNKNOWN ATTACK":
         stats["zeroday_count"] += 1
+        stats["unknown_count"] += 1
         stats["critical_count"] += 1
         stats["malicious_count"] += 1
     else:
         stats["known_count"] += 1
         stats["malicious_count"] += 1
+        if decision == "CRITICAL":
+            stats["critical_count"] += 1
+        else:
+            stats["suspicious_count"] += 1
 
     stats["total_latency_ms"] += lat
     stats["avg_latency_ms"] = round(stats["total_latency_ms"] / max(1, stats["total_flows"]), 2)
 
-    risk_score = verdict.get("anomaly_score", 0.0)
     stats["total_risk_sum"] += risk_score
     stats["average_risk"] = round(stats["total_risk_sum"] / max(1, stats["total_flows"]), 1)
 
-    alert_history.append(verdict)
-    return verdict
+    alert_history.append(alert)
+    return alert
 
 
 async def start_live_bridge():
@@ -369,11 +484,12 @@ async def replay_loop():
     global is_replaying
     patterns = ["BENIGN", "BENIGN", "BENIGN", "DoS", "BENIGN", "PortScan", "BENIGN", "ZeroDay"]
 
+    logger.info(f"Replay worker active (delay={replay_delay}s)...")
     while is_replaying:
         ptype = random.choice(patterns)
         raw_flow = generate_sample_flow(ptype)
-        verdict = process_flow_record(raw_flow)
-        await broadcast_verdict(verdict)
+        alert = process_flow_record(raw_flow)
+        await broadcast_verdict(alert)
         await asyncio.sleep(replay_delay)
 
 
@@ -532,13 +648,16 @@ async def simulate_flow(threat_type: str = Query("BENIGN")):
 # Replay & Mode Endpoints
 @app.post("/api/mode")
 @app.post("/api/replay/mode")
-async def set_mode(payload: Dict[str, Any]):
+async def set_mode(
+    mode: Optional[str] = Query(None),
+    payload: Optional[Dict[str, Any]] = None,
+):
     global current_mode, is_replaying, replay_task
-    mode = payload.get("mode", "").lower()
-    if mode not in (MODE_LIVE, MODE_CAPTURED, MODE_DEMO):
+    target_mode = (mode or (payload and payload.get("mode")) or "").lower()
+    if target_mode not in (MODE_LIVE, MODE_CAPTURED, MODE_DEMO):
         raise HTTPException(status_code=400, detail="Invalid mode. Choose: live, captured, demo")
 
-    current_mode = mode
+    current_mode = target_mode
     if current_mode == MODE_LIVE:
         is_replaying = False
         await start_live_bridge()
@@ -549,30 +668,51 @@ async def set_mode(payload: Dict[str, Any]):
         if replay_task is None or replay_task.done():
             replay_task = asyncio.create_task(replay_loop())
 
-    return {"status": "SUCCESS", "current_mode": current_mode, "is_replaying": is_replaying}
+    st = get_stats_payload()
+    await broadcast_raw({
+        "type": "mode_changed",
+        "mode": current_mode,
+        "mode_name": MODE_CONFIG[current_mode]["name"],
+        "stats": st,
+    })
+
+    return {
+        "status": "switched",
+        "mode": current_mode,
+        "mode_name": MODE_CONFIG[current_mode]["name"],
+        "source_file": MODE_CONFIG[current_mode].get("source_file", ""),
+        "interface": live_interface if current_mode == MODE_LIVE else None,
+        "stats": st,
+    }
 
 
 @app.post("/api/replay/start")
-async def start_replay_feed():
-    global is_replaying, replay_task
-    if not is_replaying:
-        is_replaying = True
-        if replay_task is None or replay_task.done():
-            replay_task = asyncio.create_task(replay_loop())
-    return {"status": "SUCCESS", "is_replaying": is_replaying}
+async def start_replay_feed(delay: Optional[float] = Query(None)):
+    global is_replaying, replay_delay, replay_task
+    if delay is not None and delay > 0:
+        replay_delay = delay
+    is_replaying = True
+    if replay_task is None or replay_task.done():
+        replay_task = asyncio.create_task(replay_loop())
+    return {"status": "started", "is_replaying": is_replaying, "delay": replay_delay}
 
 
 @app.post("/api/replay/stop")
 async def stop_replay_feed():
     global is_replaying
     is_replaying = False
-    return {"status": "SUCCESS", "is_replaying": is_replaying}
+    return {"status": "stopped", "is_replaying": is_replaying}
 
 
 @app.post("/api/replay/reset")
 async def reset_replay_feed():
     reset_stats_and_history()
-    return {"status": "SUCCESS", "message": "History and metrics cleared."}
+    st = get_stats_payload()
+    await broadcast_raw({
+        "type": "reset",
+        "stats": st,
+    })
+    return {"status": "reset", "stats": st}
 
 
 @app.post("/api/replay/speed")
@@ -581,8 +721,8 @@ async def change_speed(payload: Dict[str, Any]):
     speed = float(payload.get("speed", 1.0))
     if speed <= 0:
         raise HTTPException(status_code=400, detail="Speed must be > 0")
-    # Base delay = 0.2s, speed multiplier reduces delay
-    replay_delay = max(0.01, 0.2 / speed)
+    # Base delay = 0.15s, speed multiplier reduces delay
+    replay_delay = max(0.01, 0.15 / speed)
     return {"status": "SUCCESS", "speed_multiplier": speed, "replay_delay": replay_delay}
 
 
@@ -595,28 +735,35 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
     await websocket.accept()
     active_connections.append(websocket)
     try:
+        engine = get_risk_engine()
         # Send initial handshake with status and recent history
         init_payload = {
-            "type": "init",
-            "stats": stats,
-            "tau_threshold": risk_engine.threshold if risk_engine else 0.0687,
-            "mode": current_mode,
-            "prototypes": risk_engine.prototypes.tolist() if risk_engine and len(risk_engine.prototypes) > 0 else [],
+            "type": "initial_state",
+            "stats": get_stats_payload(),
+            "recent_alerts": list(alert_history)[-30:],
             "recent_history": list(alert_history)[-30:],
+            "tau_threshold": engine.threshold if engine else 0.0687,
+            "mode": current_mode,
+            "prototypes": engine.prototypes.tolist() if engine and len(engine.prototypes) > 0 else [],
         }
         await websocket.send_text(json.dumps(init_payload))
 
         while True:
             data = await websocket.receive_text()
-            # Handle client ping or test injection
-            msg = json.loads(data) if data.startswith("{") else {"action": data}
-            if msg.get("action") == "ping":
-                await websocket.send_text(json.dumps({"type": "pong", "time": time.time()}))
-            elif msg.get("action") == "inject":
-                ttype = msg.get("threat", "BENIGN")
-                flow = generate_sample_flow(ttype)
-                verdict = process_flow_record(flow)
-                await broadcast_verdict(verdict)
+            if data == "ping":
+                await websocket.send_text("pong")
+                continue
+            try:
+                msg = json.loads(data) if data.startswith("{") else {"action": data}
+                if msg.get("action") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong", "time": time.time()}))
+                elif msg.get("action") == "inject":
+                    ttype = msg.get("threat", "BENIGN")
+                    flow = generate_sample_flow(ttype)
+                    verdict = process_flow_record(flow)
+                    await broadcast_verdict(verdict)
+            except Exception:
+                pass
     except WebSocketDisconnect:
         if websocket in active_connections:
             active_connections.remove(websocket)

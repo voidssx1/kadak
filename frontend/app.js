@@ -5,13 +5,13 @@
  */
 
 // Global Dashboard State
-const BACKEND_BASE = (window.location.port === "8000" && (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"))
-  ? ""
-  : "http://127.0.0.1:8000";
+const BACKEND_BASE = (window.location.origin && window.location.origin.startsWith("http"))
+  ? window.location.origin
+  : "http://127.0.0.1:8001";
 
-const WS_BASE = (window.location.port === "8000" && (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost"))
+const WS_BASE = (window.location.origin && window.location.origin.startsWith("http"))
   ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`
-  : "ws://127.0.0.1:8000";
+  : "ws://127.0.0.1:8001";
 
 const state = {
   totalFlows: 0,
