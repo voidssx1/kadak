@@ -1,4 +1,24 @@
-/target
-*.jsonl
+# Python Virtual Environment
+.venv/
+venv/
+env/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+
+# Rust Build Output
+target/
+engine/target/
+
+# macOS / System
+.DS_Store
+
+# Replay flow files (except sample/demo if needed)
+live_flows.jsonl
+
+# Benchmarks: keep datasets in data/
 *.csv
-deb_cache/
+!data/**/*.csv

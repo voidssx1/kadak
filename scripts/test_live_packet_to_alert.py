@@ -22,6 +22,7 @@ import json
 import subprocess
 import time
 import socket
+from pathlib import Path
 import urllib.request
 import websockets
 
@@ -58,9 +59,9 @@ async def main():
     print("1. WebSocket listener connected to ws://127.0.0.1:8000/ws")
 
     # 2. Launch Rust network-analyzer piped into pipe_to_backend.py
-    # Command: ./target/release/network-analyzer -i virbr0 --flow-timeout 1 -f jsonl | python3 scripts/pipe_to_backend.py
+    bin_path = "./engine/target/release/network-analyzer" if Path("./engine/target/release/network-analyzer").exists() else "./target/release/network-analyzer"
     cmd = (
-        f"./target/release/network-analyzer -i {INTERFACE} --flow-timeout 1 -f jsonl "
+        f"{bin_path} -i {INTERFACE} --flow-timeout 1 -f jsonl "
         f"| python3 scripts/pipe_to_backend.py"
     )
     print(f"2. Launching live capture bridge: {cmd}")
