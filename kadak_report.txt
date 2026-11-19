@@ -1,0 +1,145 @@
+KADAK NETWORK INTRUSION DETECTION SYSTEM
+Technical and Evaluation Report
+Prepared: 19 November 2026
+Repository reviewed: /home/aditya/kadak
+
+EXECUTIVE SUMMARY
+Kadak is a demonstration network intrusion detection system (NIDS) composed of a Rust packet/flow engine, a Python FastAPI inference service, bundled machine learning artifacts, and a browser dashboard. The inference design combines a supervised LightGBM classifier for four known labels with a PyTorch autoencoder trained on synthetic benign examples; an eight-centroid KMeans summary in the autoencoder latent space is also computed and exposed as a novelty-distance signal.
+
+The data used for the reported dataset-based work are real traffic records from the CICIDS2017 dataset; they are not synthetic. The repository also contains synthetic flow generators for demonstration and runtime simulation, which are separate from the CICIDS2017 data. The checked-in training script and metadata currently describe their own generated demonstration path as synthetic-only, so those artifacts do not document or reproduce the real CICIDS2017 evaluation. The dataset files and real-data evaluation outputs are not included in this checkout. Therefore, this repository alone does not establish reproducible performance metrics; results should be attributed to CICIDS2017 only when the corresponding preprocessing, split, and evaluation results are supplied.
+
+1. SYSTEM PURPOSE AND SCOPE
+The intended workflow is to convert packet activity into flow statistics, send flow records to the inference API, produce a risk verdict, and broadcast telemetry to the dashboard. The dataset-based work uses real CICIDS2017 records. Available interfaces also include synthetic flow simulation, model metadata, health reporting, and WebSocket telemetry. Synthetic modes demonstrate the interface and response lifecycle; they are separate from the real CICIDS2017 data.
+
+The dataset records are taken from the real CICIDS2017 dataset, not generated synthetically. Separately, the checked-in `models/train_realistic.py` script generates 25,000 synthetic demonstration flows by default (60% BENIGN, 15% DoS, 12% PortScan, 8% BruteForce, 5% Infiltration_ZeroDay) using hand-authored distributions and Gaussian jitter. That script writes a file named `cicids2017_benchmark.csv`, but its contents are synthetic demonstration data, not CICIDS2017. Its known-class mapping is BENIGN=0, DoS=1, PortScan=2, BruteForce=3; its synthetic zero-day class is held out for a demonstration anomaly flag-rate calculation. This script should not be cited as the source or evaluation of the real CICIDS2017 records.
+
+2. ARCHITECTURE AND INFERENCE FLOW
+1) Input: Rust engine supports live capture, PCAP reading, and default synthetic benchmark-flow generation. A Python traffic client and FastAPI simulation route can also generate synthetic sample flows.
+2) Parsing / aggregation: Rust uses libpcap and parses Ethernet IPv4 TCP/UDP frames. It aggregates directional packet/byte statistics and TCP flags into flow records and posts JSON to /api/v1/inspect/flow. The record is documented as CICIDS2017-like, though the checked-in capture implementation populates only a subset of the full schema and uses approximations for several statistics.
+3) Feature adapter: Python maps raw flow fields into a fixed ordered 91-feature schema, fills missing values, derives interaction features, applies the bundled RobustScaler, and clips scaled values to [-10, 10].
+4) Tier 1: LightGBM outputs probabilities for BENIGN, DoS, PortScan, and BruteForce. The highest-probability label and confidence are selected.
+5) Tier 2: Autoencoder reconstructs the scaled vector. Per-flow mean squared reconstruction error is compared with the stored threshold. Its encoder also yields a 16-dimensional latent vector.
+6) Novelty signal and verdict: minimum Euclidean distance to one of eight stored latent centroids is returned. In the rule logic, a non-BENIGN LightGBM prediction at confidence >= 0.70 produces BLOCK_FLOW. Otherwise reconstruction error >= threshold labels the flow Infiltration_ZeroDay and produces QUARANTINE_HOST. Remaining flows are BENIGN / ALLOW. Prototype distance is reported but does not appear to drive the decision branches.
+7) Explainability / telemetry: SHAP TreeExplainer is attempted for LightGBM at runtime when SHAP is installed and compatible; otherwise feature-level autoencoder reconstruction departures are returned. FastAPI broadcasts verdicts to connected WebSocket dashboard clients.
+
+Important implementation distinction: the strings BLOCK_FLOW and QUARANTINE_HOST are verdict fields in the API/dashboard path. The reviewed repository does not implement a host firewall or network enforcement action. They must not be represented as proof that traffic is actually blocked or a host isolated.
+
+3. FEATURES AND PREPROCESSING
+The model input schema contains 91 features: 77 CICIDS-style raw traffic statistics plus 14 engineered features. Raw fields cover destination port; flow duration; forward/backward packet counts, lengths, rates and inter-arrival times; packet sizes; TCP flag counts; headers; subflows; initial windows; active/idle statistics; and bulk fields. IP addresses and source port are carried or accepted in runtime records but are not among the model feature list.
+
+Engineered fields listed by the trainer/schema include forward/backward packet and byte ratios, packet-length skew proxy, bytes per packet, flag density, forward IAT jitter, log packet and byte rates, forward/backward packet length spreads, directional packet ratios, and active/idle ratio. Non-finite values are replaced with zero. RobustScaler uses the 5th and 95th percentile quantile range and is fitted on benign training data only; transformed values are clipped to [-10, 10].
+
+The Rust implementation currently approximates some feature values (for example fixed standard deviations and IAT extrema) and does not calculate the entire 91-feature schema; the adapter supplies defaults and engineered values. This feature-generation mismatch is a significant deployment and evaluation concern because training and runtime feature distributions may differ.
+
+4. MODELS AND HYPERPARAMETERS
+4.1 Supervised LightGBM
+- Library/API: LightGBM native training API, multiclass objective.
+- Classes: 4; metric: multi_logloss.
+- learning_rate=0.08; num_leaves=25; max_depth=6; min_child_samples=45.
+- feature_fraction=0.85; bagging_fraction=0.85; bagging_freq=1.
+- reg_alpha=0.4; reg_lambda=0.8; random_state=42; num_boost_round=90; verbose=-1.
+- Predictions use argmax over class probabilities. Reported diagnostic confidence is the maximum class probability; a 0.70 threshold gates known-attack actioning.
+
+4.2 Deep autoencoder
+- Framework: PyTorch; input dimension=91; latent bottleneck=16.
+- Encoder: Linear 91->64, BatchNorm1d(64), LeakyReLU(0.2), Linear 64->32, BatchNorm1d(32), LeakyReLU(0.2), Linear 32->16.
+- Decoder: Linear 16->32, BatchNorm1d(32), LeakyReLU(0.2), Linear 32->64, BatchNorm1d(64), LeakyReLU(0.2), Linear 64->91.
+- Training population: benign examples from the training split; loss: mean squared error; optimizer: AdamW, learning rate=0.001, weight_decay=0.00001; batch_size=128; epochs=50.
+- Device selected by trainer: Apple MPS when available, otherwise CPU. Inference selects CUDA first, then MPS, otherwise CPU.
+- Threshold: 99th percentile of benign reconstruction errors on the held-out benign portion, stored as 0.0155 in checked-in metadata. This is synthetic calibration, not a validated operating point.
+
+4.3 Latent prototypes
+- Algorithm: scikit-learn KMeans over benign validation latent vectors.
+- n_clusters=8; random_state=42; n_init=10.
+- Stored centers are 8 vectors of 16 dimensions. The runtime calculates minimum Euclidean distance to these centers for reporting. No calibrated prototype-distance threshold is present in the reviewed decision logic.
+
+4.4 Preprocessing and reproducibility
+The training script sets NumPy and Torch seeds to 42 and limits common numerical-library thread counts to one. The synthetic generator separately seeds NumPy with 42. The known-class split uses train_test_split(test_size=0.20, random_state=42, stratify=y). The metadata file reports version 2.0.0, input_features_count=91, threshold=0.0155, synthetic-only evaluation scope, real_traffic_metrics_validated=false, and null values for lightgbm_test_accuracy, overall_accuracy, and zero_day_quarantine_rate. It includes the class mapping and prototype centers.
+
+5. EVALUATION EVIDENCE IN THIS CHECKOUT
+
+### Synthetic demonstration results (generated by rerunning the checked-in trainer)
+
+The trainer was run on 19 November 2026. It generated a synthetic dataset and evaluated the four known classes on a stratified 20% held-out split (4,750 flows). These numbers are **synthetic demonstration results only**; they are not CICIDS2017 results and do not measure real-traffic performance.
+
+| Metric | BENIGN | DoS | PortScan | BruteForce | Overall |
+|---|---:|---:|---:|---:|---:|
+| Precision | 1.0000 | 1.0000 | 1.0000 | 1.0000 | Macro/weighted: 1.0000 |
+| Recall | 1.0000 | 1.0000 | 1.0000 | 1.0000 | Macro/weighted: 1.0000 |
+| F1-score | 1.0000 | 1.0000 | 1.0000 | 1.0000 | Macro/weighted: 1.0000 |
+| Support (flows) | 3,000 | 750 | 600 | 400 | 4,750 |
+
+| Overall metric | Synthetic demo result |
+|---|---:|
+| Accuracy | 1.0000 (100.00%) |
+| ROC-AUC (macro, one-vs-rest) | 1.0000 |
+| PR-AUC (macro average precision) | 1.0000 |
+
+Confusion matrix (rows are actual labels; columns are predicted labels):
+
+| Actual \\ Predicted | BENIGN | DoS | PortScan | BruteForce |
+|---|---:|---:|---:|---:|
+| BENIGN | 3,000 | 0 | 0 | 0 |
+| DoS | 0 | 750 | 0 | 0 |
+| PortScan | 0 | 0 | 600 | 0 |
+| BruteForce | 0 | 0 | 0 | 400 |
+
+The trainer's printed precision, recall, and F1 are 1.0000 for every class, giving a diagonal confusion matrix for this run. Macro ROC-AUC was measured using one-vs-rest class scores; macro PR-AUC is macro average precision. The autoencoder demonstration reported a threshold of `0.0158` and a synthetic zero-day demonstration flag rate of `100.00%`; this is not a zero-day detection result on real attacks.
+
+Evidence that exists in source:
+- The dataset-based work uses real records from CICIDS2017, as clarified for this report. Dataset files and its evaluation artifacts are not present in this repository checkout.
+- Separately, the bundled demonstration trainer creates a stratified 80/20 split among four generated synthetic classes.
+- Trainer computes LightGBM accuracy and a per-class classification report, and generates a confusion matrix in an evaluation_dashboard.png artifact when the trainer is run.
+- Trainer evaluates reconstruction error on synthetic held-out benign flows, calibrates tau at the 99th percentile, and computes a synthetic zero-day demonstration flag rate.
+- backend/test_backend.py defines four smoke/diagnostic cases (BENIGN, DoS, PortScan, ZeroDay) and prints classifications, action strings, reconstruction errors, anomaly score, prototype distance, and latency.
+- Rust includes synthetic benchmark-flow generation and optional live / PCAP input paths.
+
+Evidence/artifacts not present or not reproducible from checked-in results:
+- No CICIDS2017 dataset files or associated real-data evaluation outputs are included in this checkout; README and trainer describe the bundled demonstration data path, not the separate real CICIDS2017 data used for the dataset-based work.
+- Checked-in metadata nulls out aggregate test accuracy and zero-day flag rate despite trainer code being able to compute them. No saved confusion matrix image or evaluation metrics file was found in the repository file listing.
+- The backend diagnostic is a four-case smoke test using generated sample flows, not a statistical benchmark; its printed success message does not establish accuracy.
+- No independent real-traffic test set, cross-validation, temporal split, per-class operational precision/recall, false-positive analysis, ROC/PR curves, calibration study, confidence intervals, drift testing, throughput benchmark, or reproducible latency results are checked in.
+- Model binary artifacts exist (LightGBM pickle, scaler pickle, autoencoder weights), but their existence alone is not validation evidence.
+
+Evaluation conclusion: distinguish the real CICIDS2017 dataset-based work from the synthetic demonstration trainer and its simulation flows. Do not label the real CICIDS2017 records as synthetic. Conversely, numbers produced by rerunning the checked-in trainer are synthetic-demo results and must not be presented as CICIDS2017 results. This checkout does not include the real dataset or corresponding evaluation artifacts, so it does not independently substantiate a performance percentage.
+
+6. RUNTIME API AND OPERATIONAL FLOW
+The FastAPI service exposes /health, /api/v1/models/info, /api/v1/inspect/flow, /api/v1/inspect/batch, /api/v1/simulate/flow, and /ws/telemetry. The Rust engine sends a flow_data JSON object to the single-flow endpoint. Inspection results include classification, threat level, detection tier, action string, confidence, reconstruction error, threshold, anomaly score, prototype distance, anomaly flags, explanatory reason, per-flow inference latency, and feature attributions.
+
+Rust modes: default synthetic benchmark stream; --live with optional --dev interface; and --pcap <file>. Capture parsing is limited to Ethernet IPv4 TCP/UDP in the reviewed parser (IPv6 and other protocols are skipped). In live mode the engine emits partial flows after packet-count or rapid SYN-probe criteria, then removes those flow entries. The PCAP reader emits on a forward-packet count condition. These choices should be documented when discussing what a “flow” means in an experiment.
+
+7. LIMITATIONS, RISKS, AND VALIDITY THREATS
+- The synthetic demonstration generator has a domain gap from real network traffic and must not be conflated with the real CICIDS2017 dataset-based work.
+- Potentially easy synthetic separation: class-specific ports and tightly specified traffic properties can make the generated task substantially simpler than real detection.
+- Held-out data is from the same synthetic generator and random process; it does not test generalization across sites, time, capture tools, or attack variants.
+- Autoencoder threshold is selected from a finite synthetic benign validation sample. Its nominal 99th-percentile calibration does not guarantee a 1% false-positive rate in deployment.
+- Runtime Rust feature values are partly approximate and the flow keys/direction handling should be validated against bidirectional traffic and packet captures.
+- The “zero-day” examples are synthetic held-out patterns with a known generator, not previously unseen real attacks.
+- Prototype distance is descriptive and not a demonstrated independent detector.
+- Action labels are advisory outputs; no enforcement integration is implemented in the reviewed flow.
+- Pickle artifacts should only be loaded from trusted sources.
+- No real-world safety, throughput, scale, resilience, or adversarial robustness assessment is included.
+
+8. RECOMMENDED EVALUATION PLAN BEFORE PERFORMANCE CLAIMS
+1) Select and document a public labeled dataset or an authorized representative capture set; preserve source, license, collection window, topology, preprocessing, and label provenance.
+2) Split by capture/session/host/time to avoid near-duplicate flow leakage; retain a final untouched test set. Ensure training scaler and all preprocessing are fit only on training data.
+3) Compare the LightGBM known-class model and the anomaly tier separately and jointly against simple baselines. Report per-class precision, recall, F1, macro-F1, confusion matrix, false-positive rate, PR-AUC/ROC-AUC where appropriate, and confidence intervals.
+4) Define an operational anomaly threshold using training/validation data and report benign false alarms and attack detection at that fixed threshold on the untouched test set. Avoid using “zero-day” unless attack families are genuinely withheld from training and are independently sourced.
+5) Validate the Rust feature extractor against an established flow exporter on the same PCAPs, including TCP/UDP, bidirectional flow assignment, timeouts, retransmissions, IPv6 scope, and missing-field semantics. Measure feature discrepancies.
+6) Measure end-to-end throughput, queueing, CPU/memory, inference latency percentiles, packet loss, and failure behavior on a documented machine and workload. Keep API inference latency distinct from network round-trip time.
+7) Test drift, benign edge cases, class imbalance, evasive variations, and threshold stability; version datasets, model files, feature schema, and evaluation scripts.
+8) Treat BLOCK_FLOW / QUARANTINE_HOST as recommendations until a separately reviewed, tested enforcement integration exists.
+
+9. REPRODUCIBILITY AND PROJECT FILES
+Primary sources reviewed: README.md; models/train_realistic.py; models/feature_list.json; models/metadata.json; models/scaler.pkl; models/lightgbm_model.pkl; models/autoencoder.pt; backend/adapter.py; backend/risk_engine.py; backend/main.py; backend/test_backend.py; engine/Cargo.toml; engine/src/main.rs; traffic_client.py; requirements.txt.
+
+Training entry point: python models/train_realistic.py (requires dependencies in requirements.txt). It regenerates synthetic training data, overwrites model/schema/metadata artifacts, and writes models/evaluation_dashboard.png. No trainer execution was performed for this report; figures and metrics have therefore not been regenerated. Diagnostic entry point: python backend/test_backend.py, which needs the runtime dependencies and bundled artifacts and exercises synthetic sample flows. These commands are listed for reproducibility, not as proof that they were run in this review.
+
+Python dependency declarations are lower bounds (for example numpy>=1.24, pandas>=2.0, scikit-learn>=1.2, torch>=2.0, lightgbm>=4.0, FastAPI>=0.100, uvicorn>=0.22, pydantic>=2.0); no pinned environment lockfile is listed. Rust declares Tokio, Serde, Serde JSON, Reqwest, rand, chrono, and pcap dependencies in engine/Cargo.toml.
+
+10. REPORTING LANGUAGE
+Recommended description: “The dataset-based work uses real traffic records from CICIDS2017; these records are not synthetic. Kadak also includes a separate synthetic demonstration trainer and synthetic simulation flows. The repository checkout does not include the CICIDS2017 files or associated evaluation artifacts, so the dataset-based results cannot be independently reproduced from this checkout.”
+
+Avoid unsupported claims such as “99% accurate,” “detects zero-days,” “wire-speed,” or “automatically quarantines hosts.” Describe the source records as real CICIDS2017 data, not synthetic. The checked-in trainer's 99th percentile refers only to synthetic benign reconstruction-error calibration; it is not a model accuracy or measured real-world false-positive rate.
+
+END OF REPORT

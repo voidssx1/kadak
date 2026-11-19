@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KADAK — Security Dashboard</title>
+  <meta name="description" content="Enterprise SIEM & Autonomous Network Intrusion Detection System with Supervised LightGBM and Deep Autoencoder Zero-Day Defense.">
+
+  <!-- Enterprise Standard Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js for High-Performance Visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css?v=2.8">
+</head>
+<body>
+  <main class="dashboard-body">
+    <!-- Top KPI Metrics Strip (7-Column Splunk Style) -->
+    <section class="kpi-strip">
+      <div class="kpi-cell">
+        <div class="kpi-label">BENIGN FLOWS</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-benign-count">0</span>
+          <span class="kpi-delta delta-green"><span class="delta-arrow">▼</span> <span id="kpi-benign-pct">100%</span></span>
+        </div>
+      </div>
+
+      <div class="kpi-cell">
+        <div class="kpi-label">FLOWS CHECKED</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-total-flows">0</span>
+          <span class="kpi-delta delta-green"><span class="delta-arrow">▲</span> LIVE</span>
+        </div>
+      </div>
+
+      <div class="kpi-cell">
+        <div class="kpi-label">KNOWN ATTACKS</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-known-count">0</span>
+        </div>
+      </div>
+
+      <div class="kpi-cell">
+        <div class="kpi-label">NEW THREATS</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-zeroday-count">0</span>
+        </div>
+      </div>
+
+      <div class="kpi-cell">
+        <div class="kpi-label">AVERAGE DETECTION TIME</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-avg-latency">0.8<span class="kpi-unit">ms</span></span>
+          <span class="kpi-delta delta-green"><span class="delta-arrow">▼</span> -18%</span>
+        </div>
+      </div>
+
+      <div class="kpi-cell">
+        <div class="kpi-label">MODEL ERROR</div>
+        <div class="kpi-row">
+          <span class="kpi-value" id="kpi-latest-mse">0.0210</span>
+          <span class="kpi-delta delta-green" id="kpi-mse-status"><span class="delta-arrow">▼</span> &lt; τ</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Primary SOC Grid: Row 1 (Visual Analytics) -->
+    <div class="soc-grid-row">
+      <!-- Card 1: Autoencoder Anomaly Departure vs Threshold (Splunk SLA curve style) -->
+      <div class="soc-card col-4">
+        <div class="card-header">
+          <h2 class="card-title">Model Error Over Time</h2>
+          
+        </div>
+        <div class="card-body chart-card-body">
+          <div class="chart-container-inner">
+            <canvas id="chart-mse-timeline"></canvas>
+          </div>
+          <div class="chart-summary-strip">
+            <div class="summary-item">
+              <span class="summary-label">Alert Threshold</span>
+              <span class="summary-val" id="summary-threshold">0.0687</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Status</span>
+              <span class="summary-val text-green" id="summary-tau-verdict">Nominal</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Notable Events Over Time (Multi-line Timeline) -->
+      <div class="soc-card col-5">
+        <div class="card-header">
+          <h2 class="card-title">Events over time</h2>
+          <div class="card-legend-inline">
+            <span class="legend-item"><span class="legend-box" style="background:#22c55e;"></span> Benign</span>
+            <span class="legend-item"><span class="legend-box" style="background:#e55353;"></span> DoS</span>
+            <span class="legend-item"><span class="legend-box" style="background:#f59e0b;"></span> PortScan</span>
+            <span class="legend-item"><span class="legend-box" style="background:#a78bfa;"></span> Zero-Day</span>
+            <span class="legend-item"><span class="legend-box" style="background:#9bb9bb;"></span> Brute Force</span>
+          </div>
+        </div>
+        <div class="card-body chart-card-body">
+          <div class="chart-container-inner">
+            <canvas id="chart-events-timeline"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Events By Status (Splunk Donut Style) -->
+      <div class="soc-card col-3">
+        <div class="card-header">
+          <h2 class="card-title">Events by Type</h2>
+        </div>
+        <div class="card-body donut-card-body">
+          <div class="donut-wrapper">
+            <canvas id="chart-distribution"></canvas>
+            <div class="donut-center-info">
+              <span class="donut-center-num" id="donut-center-count">0</span>
+              <span class="donut-center-label">ALL EVENTS</span>
+            </div>
+          </div>
+          <div class="donut-legend-list">
+            <div class="donut-legend-row">
+              <span class="donut-dot" style="background:#e55353;"></span>
+              <span class="donut-label">High (DoS / Zero-Day)</span>
+              <span class="donut-qty" id="qty-high">0</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="donut-dot" style="background:#f59e0b;"></span>
+              <span class="donut-label">Medium (PortScan)</span>
+              <span class="donut-qty" id="qty-medium">0</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="donut-dot" style="background:#22c55e;"></span>
+              <span class="donut-label">Low (Benign)</span>
+              <span class="donut-qty" id="qty-low">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Primary SOC Grid: Row 2 (Triage Stream & SIEM Diagnostics) -->
+    <div class="soc-grid-row">
+      <!-- Left Column: Real-Time Traffic Triage Stream Table (Splunk SIEM Table) -->
+      <div class="soc-card col-8" id="investigations">
+        <div class="card-header">
+          <h2 class="card-title">Live Activity</h2>
+          <div class="card-filter-group">
+            <span class="filter-caption">Filter:</span>
+            <select id="filter-classification" class="siem-select">
+              <option value="ALL">All Categories</option>
+              <option value="BENIGN">Benign Only</option>
+              <option value="DoS">DoS Attacks Only</option>
+              <option value="PortScan">PortScan Only</option>
+              <option value="Infiltration_ZeroDay">Zero-Day Only</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body table-card-body">
+          <div class="siem-table-wrapper">
+            <table class="siem-table">
+              <thead>
+                <tr>
+                  <th>TIME</th>
+                  <th>SOURCE IP</th>
+                  <th>DESTINATION</th>
+                  <th>TYPE</th>
+                  <th>MODEL ERROR</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="flow-tbody">
+                <!-- Dynamically populated via app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Performance & Open Incident Diagnostics -->
+      <div class="soc-card col-4">
+        <div class="card-body perf-body">
+          <div class="perf-stats-grid">
+            <div class="perf-stat-box">
+              <div class="perf-stat-num" id="perf-p50">—<span class="unit">ms</span></div>
+              <div class="perf-stat-label">P50 latency</div>
+            </div>
+            <div class="perf-stat-box">
+              <div class="perf-stat-num" id="perf-p95">—<span class="unit">ms</span></div>
+              <div class="perf-stat-label">P95 latency</div>
+            </div>
+            <div class="perf-stat-box">
+              <div class="perf-stat-num" id="perf-p99">—<span class="unit">ms</span></div>
+              <div class="perf-stat-label">P99 latency</div>
+            </div>
+            <div class="perf-stat-box">
+              <div class="perf-stat-num" id="perf-throughput">0<span class="unit">flows/s</span></div>
+              <div class="perf-stat-label">Throughput</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="soc-card col-4 empty-card topology-card" id="topology-card">
+        <div class="card-header topology-header">
+          <div class="card-title-group">
+            <span class="stream-badge"><span class="status-dot dot-green pulse"></span> LIVE</span>
+          </div>
+          <div class="topology-controls" aria-label="Topology zoom controls">
+            <button type="button" id="topology-zoom-out" aria-label="Zoom out">−</button>
+            <button type="button" id="topology-zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="topology-zoom-reset" aria-label="Reset zoom">Reset</button>
+          </div>
+        </div>
+        <div class="topology-body">
+          <div class="topology-visual">
+            <svg id="topology-svg" viewBox="0 0 600 300" role="img" aria-label="Live connections between observed network endpoints">
+              <g id="topology-graph"></g>
+            </svg>
+            <div class="topology-empty" id="topology-empty">Waiting for live connections…</div>
+          </div>
+          <aside class="topology-info" id="topology-info">
+            <div class="topology-info-kicker">SELECT AN ENDPOINT</div>
+            <div class="topology-info-title">No endpoint selected</div>
+            <p>Endpoints appear here as traffic arrives.</p>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Forensics Modal (Enterprise Inspection Drawer) -->
+  <div class="modal-backdrop" id="forensics-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Event Details</h3>
+        <button class="modal-close-btn" id="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-content">
+        <!-- Injected via app.js -->
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=2.14"></script>
+</body>
+</html>
